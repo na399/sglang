@@ -207,12 +207,32 @@ AUROC/AP when both classes exist, ordinal MAE, descriptive risk/coverage, and
 paired semantic-label L1/JS/top-option changes. Repeated runs are not independent
 patients or subjects. No statistical confidence interval is asserted.
 
+The load generator uses a bounded worker pool: a finished request immediately
+admits the next one instead of waiting for a fixed-size batch. Results retain
+fixture/repeat order, and unexpected failures or cancellation drain all active
+workers. `--concurrency` limits logical reads; independent reads may additionally
+fan out to the endpoint's separate concurrency limit. This is closed-loop load,
+not an open-loop arrival-rate or saturation benchmark. Request latency begins
+when a worker takes the job, not while the job is waiting in the client queue.
+
 Cold cache means a fresh namespace per request, **not** a server restart or
-weight-cache flush. Warm cache shares a namespace within a phase and includes
-warm-up. Vector timing includes native generation, parsing and separate scoring.
-Fallback time stays in its originating arm. Evaluate retained quality at equal
-coverage, not tokens/s on a different task. Run multiple disjoint dataset seeds,
-phase orders, output widths and concurrency levels before making speed claims.
+weight-cache flush. For `--cache warm`, use `--warmup-repeats 1` (the default) or
+more. Warm-up runs the same fixtures in the phase's namespace before measurement.
+Its attempts, failures and wall time are reported separately and excluded from
+measured throughput, latency and quality. Total benchmark wall time still includes
+warm-up. A warmed namespace does not guarantee KV retention under memory pressure.
+Vector timing includes native generation, parsing and separate scoring. Errors
+and fallback work remain in the originating arm's measured denominator.
+
+A field ID reused for different question definitions is split into
+`field@question_hash` metric groups rather than pooling unrelated tasks. The
+risk/coverage curve thresholds only policy-accepted outputs, includes whole tied
+probability groups, and uses all attempted labeled examples as its denominator.
+It never reintroduces an abstained or blocked answer as a usable decision.
+
+Evaluate retained quality at equal coverage, not tokens/s on a different task.
+Run multiple disjoint dataset seeds, phase orders, output widths and concurrency
+levels before making speed claims.
 
 ## Correctness boundaries
 
@@ -238,7 +258,10 @@ phase orders, output widths and concurrency levels before making speed claims.
   `generated_option` and `top_option`; it does not silently rewrite the prefix.
 * Dependencies are evaluated in topological bands. Unresolved parents block their
   children. Declarative constraints cause abstention rather than rewriting raw
-  probabilities; subsequent dependency invalidation is propagated.
+  probabilities; subsequent dependency invalidation is propagated. All constraints
+  evaluate the same eligibility snapshot, so overlapping rules cannot suppress
+  each other by changing status mid-loop. Global `diagnostics.semantics` and
+  `executed_modes` describe actual execution, including independent fallback.
 
 ## GPU readiness tests
 
@@ -254,8 +277,15 @@ export JEV_TRUST_REMOTE_CODE=1
 The tests do not download weights, start servers, or submit jobs. They require
 operator-provided servers. The own-slot-token invariance test detects causal
 logprob off-by-one errors; native UNO tests require a valid vector and observed
-verification cycles without fallback. A failure is useful compatibility/format
-information, not permission to conceal the failing arm.
+verification cycles without fallback. The suite also checks base/constrained
+vectors and independent/packed parity across mixed lengths, concurrent requests,
+and cold/warmed namespaces. A failure is useful compatibility/format information,
+not permission to conceal the failing arm.
+
+The dedicated `jev-example-cpu.yml` workflow installs only this example's CPU test
+extras and checks Python 3.10 and 3.13. It never starts a model server or enables
+live tests. Local CPU validation and the still-required GPU acceptance checklist
+are documented in [the review follow-up](docs/review-followup.md).
 
 ## Privacy and limitations
 
@@ -269,7 +299,8 @@ labels remain sensitive experiment artifacts.
 The local tokenizer is fingerprinted and checked against a server tokenization
 probe. That probe is an alignment smoke test, not cryptographic remote attestation.
 Immutable model/tokenizer/adapter files and no hot reload remain deployment
-preconditions. Cancellation attempts to abort only this client's request. The API
+preconditions. Cancellation attempts to abort only this client's request, including
+cancelling queued API work before it can acquire capacity. The API
 is loopback-first experimental infrastructure, not a hardened multi-tenant service.
 
 See [design and scope](docs/design.md) for source mappings and deferred native

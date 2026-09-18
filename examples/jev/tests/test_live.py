@@ -74,16 +74,49 @@ def test_live_own_slot_token_does_not_change_its_score():
     asyncio.run(execute())
 
 
-def test_live_uno_vector_without_fallback():
-    if not os.getenv("JEV_UNO_URL"):
+@pytest.mark.parametrize("mode", ["ar_vector", "constrained_vector", "uno_vector"])
+def test_live_vector_without_fallback(mode):
+    if mode == "uno_vector" and not os.getenv("JEV_UNO_URL"):
         pytest.skip("requires a live, released UNO adapter")
     service = live_service()
     async def execute():
         try:
-            result = await service.read(fixture_request("uno_vector"))
+            result = await service.read(fixture_request(mode))
             assert not result["diagnostics"]["fallbacks"]
-            assert result["diagnostics"]["native_uno_verification"]["observed_cycles"] > 0
+            if mode == "uno_vector":
+                assert result["diagnostics"]["native_uno_verification"]["observed_cycles"] > 0
             assert all("generated_option" in a for a in result["answers"].values())
+        finally:
+            await service.close()
+    asyncio.run(execute())
+
+
+@pytest.mark.parametrize("mode", ["independent", "packed"])
+def test_live_mixed_length_concurrency_and_cache_parity(mode):
+    """Numerical qualification, not a test of the model's semantic accuracy."""
+    import uuid
+    from sglang_jev.concurrency import gather_scoped
+
+    service = live_service()
+    original = fixture_request(mode).model_dump()
+    alternate = dict(original, state={"note": "Synthetic different-length record. " * 16})
+    requests = [ReadRequest.model_validate(original), ReadRequest.model_validate(alternate)]
+    namespace = "jev-live-parity-" + uuid.uuid4().hex
+
+    async def execute():
+        try:
+            references = [await service.read(req, cache_salt=namespace + "-warm")
+                          for req in requests]
+            for cache in ("warm", "cold"):
+                actual = await gather_scoped(*[
+                    service.read(requests[i % 2], cache_salt=(namespace + "-warm" if cache == "warm"
+                                                           else namespace + f"-cold-{i}"))
+                    for i in range(4)])
+                for i, result in enumerate(actual):
+                    for field, answer in result["answers"].items():
+                        expected = references[i % 2]["answers"][field]
+                        assert answer["probabilities"] == pytest.approx(expected["probabilities"], abs=0.01)
+                        assert answer["allowed_log_mass"] == pytest.approx(expected["allowed_log_mass"], abs=0.03)
         finally:
             await service.close()
     asyncio.run(execute())

@@ -68,6 +68,8 @@ def main():
                        help="original,reverse_fields,shuffle_options,placeholder_underscore")
     bench.add_argument("--order-seed", type=int, default=20260917)
     bench.add_argument("--cache", choices=["cold", "warm"], default="cold")
+    bench.add_argument("--warmup-repeats", type=int, default=1,
+                       help="Warm-only unmeasured repeats per fixture and phase")
     bench.add_argument("--output", type=Path, required=True)
     sub.add_parser("schema")
     args = parser.parse_args()
@@ -107,7 +109,8 @@ def main():
                                                    repeats=args.repeats, concurrency=args.concurrency,
                                                    cache=args.cache,
                                                    variants=args.variants.split(","),
-                                                   order_seed=args.order_seed)
+                                                   order_seed=args.order_seed,
+                                                   warmup_repeats=args.warmup_repeats)
                 with args.output.open("x") as f:
                     for record in records:
                         f.write(canonical_json(record) + "\n")

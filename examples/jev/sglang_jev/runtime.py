@@ -14,22 +14,12 @@ import httpx
 
 from . import __version__
 from .compiler import CompiledRead, Compiler
+from .concurrency import gather_scoped
 from .contracts import ExperimentError, InvalidVector, ProtocolError, ReadRequest, digest
 from .logprobs import apply_constraints, make_answer, read_slot_logprobs
 
 # Never persist server_info wholesale: launch_command may contain credentials.
 TOKENIZER_PROBE = "Answer:\n0: ?\n1: A B 2 C\nUnicode: α ไทย\n"
-
-
-async def gather_scoped(*awaitables):
-    tasks = [asyncio.create_task(a) for a in awaitables]
-    try:
-        return await asyncio.gather(*tasks)
-    except BaseException:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        raise
 
 
 IDENTITY_FIELDS = ("model_path", "revision", "tokenizer_path", "tokenizer_revision",
@@ -97,8 +87,8 @@ class SGLangEndpoint:
                     await asyncio.shield(asyncio.wait_for(
                         self.client.post("/abort_request", json={"rid": rid, "abort_all": False}), 3.0))
                 raise
-        if not isinstance(result, dict):
-            raise ProtocolError("expected one native generation response")
+        if not isinstance(result, dict) or not isinstance(result.get("meta_info"), dict):
+            raise ProtocolError("expected one native generation response with metadata")
         return result
 
 
@@ -282,13 +272,24 @@ class ReadService:
         violations = apply_constraints(request, answers)
         await self.check_live_identity()
         native_cycles = sum(int(u.get("spec_verify_ct", 0)) for u in usage if u["phase"] == "generation")
+        executed_modes = sorted({a["executed_mode"] for a in answers.values()
+                                 if "executed_mode" in a})
+        semantics_by_mode = {
+            "independent": "independent_questions",
+            "packed": "shared_questions_placeholder_prefix",
+            "ar_vector": "base_conditionals_along_generated_vector",
+            "uno_vector": "base_conditionals_along_generated_vector",
+            "constrained_vector": "base_conditionals_along_generated_vector",
+        }
+        actual_semantics = {semantics_by_mode[m] for m in executed_modes}
+        semantics = (next(iter(actual_semantics)) if len(actual_semantics) == 1
+                     else "mixed_execution" if actual_semantics else "no_scored_fields")
         return {
             "protocol": "sglang-jev-read/0.1", "mode": mode,
             "answers": {k: answers[k] for k in request.questions},
             "diagnostics": {
-                "semantics": ("independent_questions" if mode == "independent" else
-                              "shared_questions_placeholder_prefix" if mode == "packed" else
-                              "base_conditionals_along_generated_vector"),
+                "semantics": semantics,
+                "executed_modes": executed_modes,
                 "native_uno_verification": {"configured": mode == "uno_vector",
                                             "observed_cycles": native_cycles if mode == "uno_vector" else 0},
                 "draft_probabilities_exposed": False,

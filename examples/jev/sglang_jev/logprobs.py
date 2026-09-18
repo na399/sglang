@@ -10,7 +10,10 @@ from .contracts import ProtocolError, ReadPolicy, ReadRequest
 
 
 def distribution(logprobs: list[float]) -> tuple[list[float], float, float]:
-    if len(logprobs) < 2 or any(not math.isfinite(x) or x > 1e-5 for x in logprobs):
+    if len(logprobs) < 2 or any(
+        isinstance(x, bool) or not isinstance(x, (int, float))
+        or not math.isfinite(x) or x > 1e-5 for x in logprobs
+    ):
         raise ProtocolError("candidate logprobs must be finite and <=0")
     top = max(logprobs)
     log_mass = top + math.log(sum(math.exp(x - top) for x in logprobs))
@@ -111,8 +114,12 @@ def make_answer(slot: Slot, logprobs: list[float], policy: ReadPolicy, *,
 
 def apply_constraints(request: ReadRequest, answers: dict[str, dict]) -> list[dict]:
     violations = []
+    # Evaluate against one eligibility snapshot. Mutating status inside this
+    # loop would suppress later overlapping constraints and make order matter.
+    eligible = {k for k, answer in answers.items() if answer["status"] == "ok"}
+    invalid_fields = set()
     for c in request.constraints:
-        if any(answers[k]["status"] != "ok" for k in c.fields):
+        if not set(c.fields) <= eligible:
             continue
         if c.kind == "nondecreasing":
             values = [answers[k]["value"] for k in c.fields]
@@ -121,10 +128,12 @@ def apply_constraints(request: ReadRequest, answers: dict[str, dict]) -> list[di
             failed = all(answers[k]["top_option"] == v for k, v in zip(c.fields, c.options))
         if failed:
             violations.append({"kind": c.kind, "fields": c.fields})
-            for k in c.fields:
-                answers[k]["status"] = "abstained"
-                answers[k]["decision"] = None
-                answers[k]["abstention_reasons"].append("constraint_violation")
+            invalid_fields.update(c.fields)
+    for k in request.questions:
+        if k in invalid_fields:
+            answers[k]["status"] = "abstained"
+            answers[k]["decision"] = None
+            answers[k]["abstention_reasons"].append("constraint_violation")
     # Cross-level constraints can invalidate a parent after its child ran.
     for level in request.levels():
         for name in level:
