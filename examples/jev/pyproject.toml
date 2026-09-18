@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sglang-jev-experiment"
+version = "0.1.0"
+description = "No-training experiments for Jev-inspired typed reads on SGLang"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.28,<1", "pydantic>=2.8,<3"]
+
+[project.optional-dependencies]
+cli = ["transformers>=4.51", "fastapi>=0.115", "uvicorn>=0.30"]
+test = ["pytest>=8", "fastapi>=0.115"]
+
+[project.scripts]
+sglang-jev = "sglang_jev.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sglang_jev*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: opt-in tests against running SGLang GPU servers"]
+
+[tool.ruff]
+line-length = 88

@@ -1,0 +1,43 @@
+{
+  "state": {
+    "note": "Synthetic example: the pump currently has a cracked housing. The technician states that immediate repair is required."
+  },
+  "questions": {
+    "fault": {
+      "type": "noul",
+      "instructions": "Is a current mechanical fault asserted? A denied, historical, repaired or suspected fault alone is negative.",
+      "criteria": null,
+      "depends_on": []
+    },
+    "category": {
+      "type": "choice",
+      "instructions": "What category describes the current fault status? Historical repaired problems alone are none.",
+      "criteria": {
+        "mechanical": "A mechanical problem",
+        "none": "No problem"
+      },
+      "depends_on": []
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "Rate only the explicitly stated repair urgency. Routine=0, prompt=1, immediate=2.",
+      "criteria": [
+        "Routine",
+        "Prompt",
+        "Immediate"
+      ],
+      "depends_on": []
+    }
+  },
+  "read_policy": {
+    "mode": "independent",
+    "placeholder": "?",
+    "field_order": null,
+    "option_seed": null,
+    "min_allowed_mass": 0.0,
+    "min_max_probability": 0.0,
+    "on_invalid_vector": "error",
+    "temperature": 0.0
+  },
+  "constraints": []
+}
